@@ -218,6 +218,10 @@ The API provides comprehensive error handling for common scenarios:
 - **FFmpeg**: Video encoding and clipping
 - **Gunicorn**: Production WSGI server
 
+## Terms of Use
+
+This API is provided for educational and personal use only. Users are responsible for complying with YouTube's Terms of Service and applicable copyright laws. This tool should only be used to download content you have permission to download or content that is in the public domain. The API provider does not endorse or encourage any violation of terms of service or copyright infringement.
+
 ## License
 
 MIT License
