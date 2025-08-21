@@ -116,6 +116,29 @@ def validate_clip_times(start: Optional[int], end: Optional[int], duration: int)
         raise ValidationError(f"Clip duration ({format_duration(clip_duration)}) cannot exceed maximum allowed ({format_duration(MAX_CLIP_DURATION)})")
 
 
+def force_cleanup_all_files() -> None:
+    """Remove ALL files from temp folder to prevent storage buildup."""
+    try:
+        if not os.path.exists(DOWNLOAD_FOLDER):
+            os.makedirs(DOWNLOAD_FOLDER, exist_ok=True)
+            return
+            
+        cleaned_count = 0
+        for filename in os.listdir(DOWNLOAD_FOLDER):
+            file_path = os.path.join(DOWNLOAD_FOLDER, filename)
+            if os.path.isfile(file_path):
+                try:
+                    os.remove(file_path)
+                    cleaned_count += 1
+                    logger.info(f"Cleaned up file: {filename}")
+                except Exception as file_error:
+                    logger.error(f"Error removing file {filename}: {file_error}")
+        
+        logger.info(f"Cleanup completed: {cleaned_count} files removed")
+    except Exception as e:
+        logger.error(f"Error during cleanup: {e}")
+
+
 def cleanup_old_files() -> None:
     """Remove files older than MAX_FILE_AGE_HOURS to prevent storage buildup."""
     try:
@@ -399,8 +422,8 @@ def download_video_endpoint():
     if not is_valid:
         return jsonify(error_response), status_code
     
-    # Clean up old files
-    cleanup_old_files()
+    # Clean up ALL files before each download to prevent storage issues
+    force_cleanup_all_files()
     
     try:
         # Parse request data
