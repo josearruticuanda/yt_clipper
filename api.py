@@ -877,55 +877,6 @@ def health_check():
         "available_space": "dynamic cleanup"
     })
 
-###################################################################################################################################
-# ffmpeg testing (remmove later)
-@app.route("/test-ffmpeg", methods=["GET"])
-def test_ffmpeg():
-    """Test if FFmpeg is available and working."""
-    try:
-        import subprocess
-        
-        # Test FFmpeg version
-        ffmpeg_result = subprocess.run(['ffmpeg', '-version'], 
-                                     capture_output=True, text=True, timeout=10)
-        
-        # Test FFprobe version  
-        ffprobe_result = subprocess.run(['ffprobe', '-version'], 
-                                      capture_output=True, text=True, timeout=10)
-        
-        return jsonify({
-            "status": "success",
-            "ffmpeg_available": True,
-            "ffmpeg_version": ffmpeg_result.stdout.split('\n')[0],
-            "ffprobe_version": ffprobe_result.stdout.split('\n')[0],
-            "system_info": {
-                "python_version": f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}",
-                "platform": os.name,
-                "working_directory": os.getcwd()
-            }
-        })
-        
-    except subprocess.TimeoutExpired:
-        return jsonify({
-            "status": "error",
-            "ffmpeg_available": False,
-            "error": "FFmpeg command timed out"
-        }), 500
-        
-    except FileNotFoundError:
-        return jsonify({
-            "status": "error", 
-            "ffmpeg_available": False,
-            "error": "FFmpeg not found in system PATH"
-        }), 500
-        
-    except Exception as e:
-        return jsonify({
-            "status": "error",
-            "ffmpeg_available": False,
-            "error": str(e)
-        }), 500
-###################################################################################################################################
 
 # Error handlers
 @app.errorhandler(404)
