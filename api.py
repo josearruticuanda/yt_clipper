@@ -1,30 +1,83 @@
 import os
 import tempfile
 import logging
+import asyncio
+import zipfile
 from datetime import datetime, timedelta
-from typing import Optional, Tuple, Dict, Any
+from typing import Optional, Tuple, Dict, Any, List
 from urllib.parse import urlparse
+from dataclasses import dataclass
+from enum import Enum
 
 import yt_dlp
 from flask import Flask, send_file, request, jsonify
 
 # Configure logging
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
 logger = logging.getLogger(__name__)
 
 # CONFIGURATION
 app = Flask(__name__)
-app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max request size
+app.config['MAX_CONTENT_LENGTH'] = 32 * 1024 * 1024  # 32MB max request size
 
 # Constants
 DOWNLOAD_FOLDER = "temp_downloads"
-MAX_FILE_AGE_HOURS = 2
-MAX_CLIP_DURATION = 1800  # 30 minutes max for reliable API performance
+MAX_FILE_AGE_HOURS = 1
+MAX_CLIP_DURATION = 3600  # 1 hour max for reliable API performance
 MIN_CLIP_DURATION = 1     # 1 second min clip duration
-MAX_VIDEO_DURATION = 14400  # 4 hours max total video duration
+MAX_VIDEO_DURATION = 18000  # 5 hours max total video duration
 
 # Ensure download folder exists
 os.makedirs(DOWNLOAD_FOLDER, exist_ok=True)
+
+
+class DownloadMode(Enum):
+    """Download modes for different use cases"""
+    FAST = "fast"          # Stream copying, fastest but may have issues
+    BALANCED = "balanced"  # Good balance of speed and quality
+    PRECISE = "precise"    # Re-encoding, slowest but most reliable
+    AUDIO_ONLY = "audio_only"  # Audio extraction only
+
+
+class VideoQuality(Enum):
+    """Video quality options"""
+    BEST = "best"
+    UHD_4K = "2160p"
+    QHD_2K = "1440p"
+    FHD = "1080p"
+    HD = "720p"
+    SD = "480p"
+    LD = "360p"
+    WORST = "worst"
+
+
+class AudioQuality(Enum):
+    """Audio quality options"""
+    BEST = "best"
+    HIGH = "320"    # 320 kbps
+    MEDIUM = "192"  # 192 kbps
+    LOW = "128"     # 128 kbps
+    WORST = "worst"
+
+
+@dataclass
+class DownloadOptions:
+    """Configuration class for download options"""
+    url: str
+    start_time: Optional[int] = None
+    end_time: Optional[int] = None
+    video_quality: VideoQuality = VideoQuality.BEST
+    audio_quality: AudioQuality = AudioQuality.BEST
+    download_mode: DownloadMode = DownloadMode.BALANCED
+    extract_audio: bool = False
+    include_subtitles: bool = False
+    subtitle_languages: List[str] = None
+    thumbnail: bool = False
+    metadata: bool = True
+    custom_format: Optional[str] = None
 
 
 class VideoDownloadError(Exception):
@@ -71,7 +124,10 @@ def validate_youtube_url(url: str) -> bool:
     
     try:
         parsed = urlparse(url)
-        valid_domains = ['youtube.com', 'www.youtube.com', 'youtu.be', 'm.youtube.com']
+        valid_domains = [
+            'youtube.com', 'www.youtube.com', 'youtu.be', 'm.youtube.com',
+            'music.youtube.com', 'gaming.youtube.com'
+        ]
         return parsed.netloc.lower() in valid_domains
     except Exception:
         return False
@@ -91,7 +147,10 @@ def validate_clip_times(start: Optional[int], end: Optional[int], duration: int)
     """
     # Check if video duration exceeds maximum allowed
     if duration > MAX_VIDEO_DURATION:
-        raise ValidationError(f"Video duration ({format_duration(duration)}) exceeds maximum allowed duration ({format_duration(MAX_VIDEO_DURATION)})")
+        raise ValidationError(
+            f"Video duration ({format_duration(duration)}) exceeds maximum "
+            f"allowed duration ({format_duration(MAX_VIDEO_DURATION)})"
+        )
     
     if start is None or end is None:
         return
@@ -106,14 +165,22 @@ def validate_clip_times(start: Optional[int], end: Optional[int], duration: int)
         raise ValidationError("Start time must be less than end time")
     
     if end > duration:
-        raise ValidationError(f"End time ({format_duration(end)}) exceeds video duration ({format_duration(duration)})")
+        raise ValidationError(
+            f"End time ({format_duration(end)}) exceeds video duration "
+            f"({format_duration(duration)})"
+        )
     
     clip_duration = end - start
     if clip_duration < MIN_CLIP_DURATION:
-        raise ValidationError(f"Clip duration must be at least {MIN_CLIP_DURATION} second(s)")
+        raise ValidationError(
+            f"Clip duration must be at least {MIN_CLIP_DURATION} second(s)"
+        )
     
     if clip_duration > MAX_CLIP_DURATION:
-        raise ValidationError(f"Clip duration ({format_duration(clip_duration)}) cannot exceed maximum allowed ({format_duration(MAX_CLIP_DURATION)})")
+        raise ValidationError(
+            f"Clip duration ({format_duration(clip_duration)}) cannot exceed "
+            f"maximum allowed ({format_duration(MAX_CLIP_DURATION)})"
+        )
 
 
 def force_cleanup_all_files() -> None:
@@ -194,11 +261,33 @@ def extract_video_info(url: str) -> Dict[str, Any]:
             'quiet': True,
             'no_warnings': True,
             'extractaudio': False,
-            'extract_flat': False
+            'extract_flat': False,
+            'cookiefile': None,  # Don't use cookies by default
+            'no_check_certificate': False,
         }
         
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=False)
+            
+            # Extract available formats
+            formats = info.get('formats', [])
+            available_qualities = set()
+            
+            for fmt in formats:
+                height = fmt.get('height')
+                if height:
+                    if height >= 2160:
+                        available_qualities.add('2160p')
+                    elif height >= 1440:
+                        available_qualities.add('1440p')
+                    elif height >= 1080:
+                        available_qualities.add('1080p')
+                    elif height >= 720:
+                        available_qualities.add('720p')
+                    elif height >= 480:
+                        available_qualities.add('480p')
+                    elif height >= 360:
+                        available_qualities.add('360p')
             
             return {
                 'title': info.get('title', 'Unknown'),
@@ -206,9 +295,17 @@ def extract_video_info(url: str) -> Dict[str, Any]:
                 'uploader': info.get('uploader', 'Unknown'),
                 'upload_date': info.get('upload_date'),
                 'view_count': info.get('view_count', 0),
+                'like_count': info.get('like_count', 0),
                 'description': info.get('description', ''),
                 'thumbnail': info.get('thumbnail'),
-                'webpage_url': info.get('webpage_url', url)
+                'webpage_url': info.get('webpage_url', url),
+                'available_qualities': sorted(list(available_qualities), 
+                                            key=lambda x: int(x[:-1]), reverse=True),
+                'formats_count': len(formats),
+                'has_subtitles': bool(info.get('subtitles')),
+                'subtitle_languages': list(info.get('subtitles', {}).keys()),
+                'chapters': info.get('chapters', []),
+                'tags': info.get('tags', [])
             }
             
     except Exception as e:
@@ -236,66 +333,125 @@ def format_duration(seconds: int) -> str:
     return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
 
 
-def get_format_selector(quality: str) -> str:
+def get_format_selector(options: DownloadOptions) -> str:
     """
-    Get yt-dlp format selector based on quality preference.
+    Get yt-dlp format selector based on options.
     
     Args:
-        quality: Quality preference (best, 2160p, 1440p, 1080p, 720p, 480p, 360p)
+        options: Download options
         
     Returns:
         Format selector string for yt-dlp
     """
-    quality_formats = {
-        'best': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best',
-        '2160p': 'bestvideo[height<=2160][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<=2160]+bestaudio/best[height<=2160]',
-        '1440p': 'bestvideo[height<=1440][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<=1440]+bestaudio/best[height<=1440]',
-        '1080p': 'bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<=1080]+bestaudio/best[height<=1080]',
-        '720p': 'bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<=720]+bestaudio/best[height<=720]',
-        '480p': 'bestvideo[height<=480][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<=480]+bestaudio/best[height<=480]',
-        '360p': 'bestvideo[height<=360][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<=360]+bestaudio/best[height<=360]'
-    }
+    if options.custom_format:
+        return options.custom_format
     
-    return quality_formats.get(quality.lower(), quality_formats['best'])
+    if options.download_mode == DownloadMode.AUDIO_ONLY:
+        if options.audio_quality == AudioQuality.BEST:
+            return "bestaudio/best"
+        elif options.audio_quality == AudioQuality.WORST:
+            return "worstaudio/worst"
+        else:
+            abr = options.audio_quality.value
+            return f"bestaudio[abr<={abr}]/bestaudio/best"
+    
+    # Video + Audio formats
+    video_selector = ""
+    audio_selector = "bestaudio"
+    
+    # Configure video quality
+    if options.video_quality == VideoQuality.BEST:
+        video_selector = "bestvideo"
+    elif options.video_quality == VideoQuality.WORST:
+        video_selector = "worstvideo"
+    else:
+        height = options.video_quality.value[:-1]  # Remove 'p'
+        video_selector = f"bestvideo[height<={height}]"
+    
+    # Configure audio quality
+    if options.audio_quality != AudioQuality.BEST:
+        if options.audio_quality == AudioQuality.WORST:
+            audio_selector = "worstaudio"
+        else:
+            abr = options.audio_quality.value
+            audio_selector = f"bestaudio[abr<={abr}]"
+    
+    # Prefer mp4 container
+    format_string = f"{video_selector}[ext=mp4]+{audio_selector}[ext=m4a]/{video_selector}+{audio_selector}/best"
+    
+    return format_string
 
 
-def validate_quality(quality: str) -> str:
+def get_download_options_from_request(data: Dict[str, Any]) -> DownloadOptions:
     """
-    Validate and normalize quality parameter.
+    Parse request data into DownloadOptions object.
     
     Args:
-        quality: Quality string to validate
+        data: Request JSON data
         
     Returns:
-        Normalized quality string
+        DownloadOptions object
         
     Raises:
-        ValidationError: If quality is invalid
+        ValidationError: If validation fails
     """
-    valid_qualities = ['best', '2160p', '1440p', '1080p', '720p', '480p', '360p']
+    url = data.get("url")
+    if not url:
+        raise ValidationError("URL is required")
     
-    if quality is None:
-        return 'best'
+    if not validate_youtube_url(url):
+        raise ValidationError("Invalid YouTube URL")
     
-    quality = quality.lower().strip()
+    # Parse quality options
+    video_quality_str = data.get("video_quality", "best").lower()
+    try:
+        video_quality = VideoQuality(video_quality_str)
+    except ValueError:
+        valid_qualities = [q.value for q in VideoQuality]
+        raise ValidationError(f"Invalid video quality. Valid options: {valid_qualities}")
     
-    if quality not in valid_qualities:
-        raise ValidationError(f"Invalid quality '{quality}'. Supported qualities: {', '.join(valid_qualities)}")
+    audio_quality_str = data.get("audio_quality", "best").lower()
+    try:
+        audio_quality = AudioQuality(audio_quality_str)
+    except ValueError:
+        valid_qualities = [q.value for q in AudioQuality]
+        raise ValidationError(f"Invalid audio quality. Valid options: {valid_qualities}")
     
-    return quality
+    # Parse download mode
+    download_mode_str = data.get("download_mode", "balanced").lower()
+    try:
+        download_mode = DownloadMode(download_mode_str)
+    except ValueError:
+        valid_modes = [m.value for m in DownloadMode]
+        raise ValidationError(f"Invalid download mode. Valid options: {valid_modes}")
+    
+    # Parse subtitle languages
+    subtitle_languages = data.get("subtitle_languages", [])
+    if isinstance(subtitle_languages, str):
+        subtitle_languages = [lang.strip() for lang in subtitle_languages.split(",")]
+    
+    return DownloadOptions(
+        url=url,
+        start_time=data.get("start"),
+        end_time=data.get("end"),
+        video_quality=video_quality,
+        audio_quality=audio_quality,
+        download_mode=download_mode,
+        extract_audio=data.get("extract_audio", False),
+        include_subtitles=data.get("include_subtitles", False),
+        subtitle_languages=subtitle_languages,
+        thumbnail=data.get("thumbnail", False),
+        metadata=data.get("metadata", True),
+        custom_format=data.get("custom_format")
+    )
 
 
-def download_video(url: str, start_time: Optional[int] = None, 
-                  end_time: Optional[int] = None, quality: str = 'best', fast_clip: bool = False) -> str:
+def download_video(options: DownloadOptions) -> str:
     """
-    Download video from YouTube with optional clipping and quality selection.
+    Download video from YouTube with customizable options.
     
     Args:
-        url: YouTube video URL
-        start_time: Start time in seconds for clipping
-        end_time: End time in seconds for clipping
-        quality: Video quality preference (best, 2160p, 1440p, 1080p, 720p, 480p, 360p)
-        fast_clip: If True, use fast stream copying (may have video issues but much faster)
+        options: Download configuration options
         
     Returns:
         Path to downloaded file
@@ -305,70 +461,153 @@ def download_video(url: str, start_time: Optional[int] = None,
     """
     try:
         # Get video info first
-        info = extract_video_info(url)
+        info = extract_video_info(options.url)
         video_title = sanitize_filename(info['title'])
+        
+        # Validate clip times if specified
+        validate_clip_times(options.start_time, options.end_time, info['duration'])
         
         # Generate unique filename
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = f"{video_title}_{timestamp}.mp4"
-        file_path = os.path.join(DOWNLOAD_FOLDER, filename)
+        
+        # For audio extraction, don't add extension yet - yt-dlp will handle it
+        if options.extract_audio:
+            filename = f"{video_title}_{timestamp}"
+            file_path = os.path.join(DOWNLOAD_FOLDER, filename)
+        else:
+            filename = f"{video_title}_{timestamp}.mp4"
+            file_path = os.path.join(DOWNLOAD_FOLDER, filename)
         
         # Configure download options
-        format_selector = get_format_selector(quality)
+        format_selector = get_format_selector(options)
+        
         ydl_opts = {
             'format': format_selector,
             'outtmpl': file_path,
-            'merge_output_format': 'mp4',
             'quiet': True,
             'no_warnings': True,
-            'writesubtitles': False,
-            'writeautomaticsub': False
+            'writesubtitles': options.include_subtitles,
+            'writeautomaticsub': False,
+            'writeinfojson': options.metadata,
+            'writethumbnail': options.thumbnail,
+            'embed_subs': False,  # Keep subtitles as separate files
+            'keepvideo': False,
         }
         
-        # Add clipping if specified
-        if start_time is not None and end_time is not None:
-            if fast_clip:
-                # Fast clipping using FFmpeg with stream copying but keyframe-aware cutting
-                ydl_opts['postprocessors'] = [{
-                    'key': 'FFmpegVideoConvertor',
-                    'preferedformat': 'mp4',
-                }]
+        # Configure output format
+        if not options.extract_audio:
+            ydl_opts['merge_output_format'] = 'mp4'
+        
+        # Configure subtitle languages
+        if options.include_subtitles and options.subtitle_languages:
+            ydl_opts['subtitleslangs'] = options.subtitle_languages
+        elif options.include_subtitles:
+            ydl_opts['subtitleslangs'] = ['en']  # Default to English
+        
+        # Configure post-processors - FIXED FOR AUDIO CLIPS
+        postprocessors = []
+        
+        # Handle audio extraction and clipping together
+        if options.extract_audio:
+            if options.start_time is not None and options.end_time is not None:
+                # For audio clips, do everything in one FFmpeg command
+                clip_duration = options.end_time - options.start_time
+                quality = options.audio_quality.value if options.audio_quality != AudioQuality.BEST else '192'
                 
-                # Use stream copying with keyframe seeking for speed
-                ydl_opts['postprocessor_args'] = [
-                    '-ss', str(start_time),
-                    '-t', str(end_time - start_time),
-                    '-c:v', 'copy',  # Copy video stream (faster)
-                    '-c:a', 'copy',  # Copy audio stream (faster) 
-                    '-copyts',       # Copy timestamps
-                    '-avoid_negative_ts', 'make_zero',
-                    '-fflags', '+genpts'  # Generate presentation timestamps
-                ]
+                # Single post-processor that clips AND extracts audio
+                audio_clip_postprocessor = {
+                    'key': 'FFmpegExtractAudio',
+                    'preferredcodec': 'mp3',
+                    'preferredquality': quality,
+                    'when': 'post_process',
+                }
                 
-                logger.info(f"Fast clipping {quality} from {format_duration(start_time)} to {format_duration(end_time)} (stream copy mode)")
+                # Add clipping arguments to the audio extraction
+                ydl_opts['postprocessor_args'] = {
+                    'ffmpeg': [
+                        '-ss', str(options.start_time),
+                        '-t', str(clip_duration),
+                        '-avoid_negative_ts', 'make_zero'
+                    ]
+                }
+                
+                postprocessors.append(audio_clip_postprocessor)
+                
+                logger.info(f"Audio clip: extracting {format_duration(clip_duration)} from {format_duration(options.start_time)} to {format_duration(options.end_time)}")
             else:
-                # Slow but reliable clipping with re-encoding
-                ydl_opts['postprocessors'] = [{
+                # Just audio extraction, no clipping
+                audio_postprocessor = {
+                    'key': 'FFmpegExtractAudio',
+                    'preferredcodec': 'mp3',
+                    'preferredquality': options.audio_quality.value if options.audio_quality != AudioQuality.BEST else '192',
+                }
+                postprocessors.append(audio_postprocessor)
+                
+        else:
+            # Video-only clipping (existing logic)
+            if options.start_time is not None and options.end_time is not None:
+                clip_duration = options.end_time - options.start_time
+                
+                if options.download_mode == DownloadMode.FAST:
+                    ffmpeg_args = [
+                        '-ss', str(options.start_time),
+                        '-t', str(clip_duration),
+                        '-c:v', 'copy',
+                        '-c:a', 'copy',
+                        '-copyts',
+                        '-avoid_negative_ts', 'make_zero',
+                        '-fflags', '+genpts'
+                    ]
+                    logger.info(f"Fast clipping from {format_duration(options.start_time)} "
+                               f"to {format_duration(options.end_time)} (stream copy mode)")
+                elif options.download_mode == DownloadMode.PRECISE:
+                    ffmpeg_args = [
+                        '-ss', str(options.start_time),
+                        '-t', str(clip_duration),
+                        '-c:v', 'libx264',
+                        '-preset', 'fast',
+                        '-crf', '23',
+                        '-c:a', 'aac',
+                        '-b:a', '192k',
+                        '-avoid_negative_ts', 'make_zero'
+                    ]
+                    logger.info(f"Precise clipping from {format_duration(options.start_time)} "
+                               f"to {format_duration(options.end_time)} (re-encoding mode)")
+                else:  # BALANCED
+                    ffmpeg_args = [
+                        '-ss', str(options.start_time),
+                        '-t', str(clip_duration),
+                        '-c:v', 'libx264',
+                        '-preset', 'veryfast',
+                        '-crf', '25',
+                        '-c:a', 'copy',
+                        '-avoid_negative_ts', 'make_zero'
+                    ]
+                    logger.info(f"Balanced clipping from {format_duration(options.start_time)} "
+                               f"to {format_duration(options.end_time)} (fast encode mode)")
+                
+                video_postprocessor = {
                     'key': 'FFmpegVideoConvertor',
                     'preferedformat': 'mp4',
-                }]
+                }
                 
-                # Add FFmpeg arguments for precise cutting
-                ydl_opts['postprocessor_args'] = [
-                    '-ss', str(start_time),
-                    '-t', str(end_time - start_time),  # Duration instead of end time
-                    '-c:v', 'libx264',  # Re-encode video to ensure proper cutting
-                    '-c:a', 'aac',      # Re-encode audio
-                    '-avoid_negative_ts', 'make_zero'  # Fix timing issues
-                ]
-                
-                logger.info(f"Precise clipping {quality} from {format_duration(start_time)} to {format_duration(end_time)} (duration: {format_duration(end_time - start_time)})")
-        else:
-            logger.info(f"Downloading full video in {quality} quality")
+                ydl_opts['postprocessor_args'] = {'ffmpeg': ffmpeg_args}
+                postprocessors.append(video_postprocessor)
+        
+        if postprocessors:
+            ydl_opts['postprocessors'] = postprocessors
         
         # Download the video
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            ydl.download([url])
+            ydl.download([options.url])
+        
+        # For audio extraction, find the actual created file (yt-dlp adds .mp3)
+        if options.extract_audio:
+            # Look for the created audio file
+            for f in os.listdir(DOWNLOAD_FOLDER):
+                if f.startswith(filename) and f.endswith('.mp3'):
+                    file_path = os.path.join(DOWNLOAD_FOLDER, f)
+                    break
         
         # Verify file was created
         if not os.path.exists(file_path):
@@ -389,34 +628,49 @@ def download_video(url: str, start_time: Optional[int] = None,
 def home():
     """API information endpoint."""
     return jsonify({
-        "service": "YouTube Video Clipper API",
-        "version": "1.0.0",
-        "description": "Download full or clipped videos from YouTube",
+        "service": "Enhanced YouTube Video Clipper API",
+        "version": "2.0.0",
+        "description": "Advanced YouTube video downloader with customizable quality, clipping, and processing options",
+        "yt_dlp_version": "2025.08.20",
         "endpoints": {
-            "/download": "POST - Download video with optional clipping",
-            "/info": "POST - Get video information without downloading",
-            "/health": "GET - Health check"
+            "/download": "POST - Download video with advanced options",
+            "/info": "POST - Get detailed video information",
+            "/health": "GET - Health check",
+            "/formats": "POST - Get available formats for a video"
         },
         "parameters": {
             "url": "YouTube video URL (required)",
             "start": "Start time in seconds for clipping (optional)",
             "end": "End time in seconds for clipping (optional)",
-            "quality": "Video quality: best, 2160p, 1440p, 1080p, 720p, 480p, 360p (optional, default: best)",
-            "fast_clip": "Use fast clipping (may have video issues, default: false)"
+            "video_quality": f"Video quality: {[q.value for q in VideoQuality]} (default: best)",
+            "audio_quality": f"Audio quality: {[q.value for q in AudioQuality]} (default: best)",
+            "download_mode": f"Download mode: {[m.value for m in DownloadMode]} (default: balanced)",
+            "extract_audio": "Extract audio only (boolean, default: false)",
+            "include_subtitles": "Include subtitles (boolean, default: false)",
+            "subtitle_languages": "Subtitle languages (array/comma-separated, e.g., ['en', 'es'])",
+            "thumbnail": "Download thumbnail (boolean, default: false)",
+            "metadata": "Include metadata (boolean, default: true)",
+            "custom_format": "Custom yt-dlp format selector (overrides quality settings)"
+        },
+        "download_modes": {
+            "fast": "Stream copying - fastest but may have sync issues",
+            "balanced": "Fast encode - good balance of speed and quality",
+            "precise": "Full re-encode - slowest but most reliable",
+            "audio_only": "Audio extraction only"
         },
         "limits": {
             "max_clip_duration": f"{format_duration(MAX_CLIP_DURATION)}",
             "min_clip_duration": f"{MIN_CLIP_DURATION} second",
             "max_video_duration": f"{format_duration(MAX_VIDEO_DURATION)}",
-            "supported_qualities": ["best", "2160p", "1440p", "1080p", "720p", "480p", "360p"],
-            "supported_domains": ["youtube.com", "youtu.be"]
+            "max_file_age": f"{MAX_FILE_AGE_HOURS} hour(s)",
+            "supported_domains": ["youtube.com", "youtu.be", "music.youtube.com"]
         }
     })
 
 
 @app.route("/download", methods=["POST"])
 def download_video_endpoint():
-    """Download video endpoint with optional clipping."""
+    """Enhanced download video endpoint with advanced options."""
     # Validate RapidAPI headers
     is_valid, error_response, status_code = validate_rapidapi_headers()
     if not is_valid:
@@ -431,37 +685,59 @@ def download_video_endpoint():
         if not data:
             return jsonify({"error": "No JSON data provided"}), 400
         
-        url = data.get("url")
-        start_time = data.get("start")
-        end_time = data.get("end")
-        quality = data.get("quality", "best")
-        fast_clip = data.get("fast_clip", False)
-        
-        # Validate inputs
-        if not validate_youtube_url(url):
-            return jsonify({"error": "Invalid YouTube URL"}), 400
-        
+        # Parse and validate options
         try:
-            quality = validate_quality(quality)
+            options = get_download_options_from_request(data)
         except ValidationError as e:
             return jsonify({"error": str(e)}), 400
         
-        # Get video info and validate clip times
-        try:
-            info = extract_video_info(url)
-            validate_clip_times(start_time, end_time, info['duration'])
-        except (ValidationError, VideoDownloadError) as e:
-            return jsonify({"error": str(e)}), 400
-        
         # Download video
-        file_path = download_video(url, start_time, end_time, quality, fast_clip)
+        file_path = download_video(options)
         filename = os.path.basename(file_path)
+        
+        # If subtitles were requested, create a ZIP with video + subtitle files
+        if options.include_subtitles:
+            # Get the base filename (without extension)
+            base_name = os.path.splitext(filename)[0]
+            
+            # Find all subtitle files
+            subtitle_files = []
+            for f in os.listdir(DOWNLOAD_FOLDER):
+                if f.startswith(base_name) and ('.vtt' in f or '.srt' in f or '.ass' in f):
+                    subtitle_files.append(f)
+            
+            if subtitle_files:
+                # Create ZIP file
+                zip_filename = f"{base_name}_with_subs.zip"
+                zip_path = os.path.join(DOWNLOAD_FOLDER, zip_filename)
+                
+                with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+                    # Add main video file
+                    zipf.write(file_path, filename)
+                    
+                    # Add subtitle files
+                    for sub_file in subtitle_files:
+                        sub_path = os.path.join(DOWNLOAD_FOLDER, sub_file)
+                        if os.path.exists(sub_path):
+                            zipf.write(sub_path, sub_file)
+                
+                logger.info(f"Created ZIP with video + {len(subtitle_files)} subtitle files")
+                
+                return send_file(
+                    zip_path,
+                    as_attachment=True,
+                    download_name=zip_filename,
+                    mimetype='application/zip'
+                )
+        
+        # If no subtitles requested or no subtitle files found, send just the video/audio
+        mime_type = 'audio/mpeg' if options.extract_audio else 'video/mp4'
         
         return send_file(
             file_path,
             as_attachment=True,
             download_name=filename,
-            mimetype='video/mp4'
+            mimetype=mime_type
         )
         
     except VideoDownloadError as e:
@@ -473,7 +749,7 @@ def download_video_endpoint():
 
 @app.route("/info", methods=["POST"])
 def get_video_info_endpoint():
-    """Get video information endpoint."""
+    """Get detailed video information endpoint."""
     # Validate RapidAPI headers
     is_valid, error_response, status_code = validate_rapidapi_headers()
     if not is_valid:
@@ -502,9 +778,16 @@ def get_video_info_endpoint():
             "uploader": info['uploader'],
             "upload_date": info['upload_date'],
             "view_count": info['view_count'],
+            "like_count": info['like_count'],
             "description": info['description'][:500] + "..." if len(info['description']) > 500 else info['description'],
             "thumbnail": info['thumbnail'],
-            "webpage_url": info['webpage_url']
+            "webpage_url": info['webpage_url'],
+            "available_qualities": info['available_qualities'],
+            "formats_count": info['formats_count'],
+            "has_subtitles": info['has_subtitles'],
+            "subtitle_languages": info['subtitle_languages'],
+            "chapters": info['chapters'],
+            "tags": info['tags'][:10]  # Limit to first 10 tags
         }
         
         return jsonify({
@@ -519,14 +802,79 @@ def get_video_info_endpoint():
         return jsonify({"error": "An unexpected error occurred"}), 500
 
 
+@app.route("/formats", methods=["POST"])
+def get_video_formats_endpoint():
+    """Get available formats for a video."""
+    # Validate RapidAPI headers
+    is_valid, error_response, status_code = validate_rapidapi_headers()
+    if not is_valid:
+        return jsonify(error_response), status_code
+    
+    try:
+        # Parse request data
+        data = request.get_json()
+        if not data:
+            return jsonify({"error": "No JSON data provided"}), 400
+        
+        url = data.get("url")
+        
+        # Validate URL
+        if not validate_youtube_url(url):
+            return jsonify({"error": "Invalid YouTube URL"}), 400
+        
+        # Get detailed format information
+        ydl_opts = {
+            'quiet': True,
+            'no_warnings': True,
+            'listformats': True,
+        }
+        
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(url, download=False)
+            
+            formats = []
+            for fmt in info.get('formats', []):
+                format_info = {
+                    'format_id': fmt.get('format_id'),
+                    'ext': fmt.get('ext'),
+                    'resolution': fmt.get('resolution', 'unknown'),
+                    'fps': fmt.get('fps'),
+                    'vcodec': fmt.get('vcodec'),
+                    'acodec': fmt.get('acodec'),
+                    'filesize': fmt.get('filesize'),
+                    'tbr': fmt.get('tbr'),  # Total bitrate
+                    'vbr': fmt.get('vbr'),  # Video bitrate
+                    'abr': fmt.get('abr'),  # Audio bitrate
+                    'width': fmt.get('width'),
+                    'height': fmt.get('height'),
+                    'format_note': fmt.get('format_note', ''),
+                    'quality': fmt.get('quality'),
+                }
+                formats.append(format_info)
+        
+        return jsonify({
+            "status": "success",
+            "formats": formats,
+            "total_formats": len(formats)
+        })
+        
+    except Exception as e:
+        logger.error(f"Error getting formats: {e}")
+        return jsonify({"error": "Failed to get video formats"}), 500
+
+
 @app.route("/health", methods=["GET"])
 def health_check():
     """Health check endpoint."""
     return jsonify({
         "status": "healthy",
-        "service": "YouTube Clipper API",
+        "service": "Enhanced YouTube Clipper API",
         "timestamp": datetime.now().isoformat(),
-        "version": "1.0.0"
+        "version": "2.0.0",
+        "yt_dlp_version": "2025.08.20",
+        "python_version": "3.10+",
+        "download_folder": DOWNLOAD_FOLDER,
+        "available_space": "dynamic cleanup"
     })
 
 
@@ -553,6 +901,6 @@ def internal_server_error(error):
 
 
 if __name__ == "__main__":
-    # For production, use a WSGI server like gunicorn
+    # For production on Windows, use waitress instead of gunicorn
     # For development/testing only
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)), debug=False)
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)), debug=False, threaded=True)
