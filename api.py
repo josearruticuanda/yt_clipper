@@ -108,7 +108,23 @@ def validate_rapidapi_headers() -> Tuple[bool, Optional[Dict], int]:
     #         "message": "X-RapidAPI-Key and X-RapidAPI-Host headers are required"
     #     }, 401
     
-    return True, None, 200
+    # return True, None, 200
+    rapidapi_key = request.headers.get('X-RapidAPI-Key')
+    rapidapi_host = request.headers.get('X-RapidAPI-Host')
+    
+    # More lenient check - accept if either header exists
+    if rapidapi_key or rapidapi_host:
+        return True, None, 200
+    
+    # For testing: check if it looks like it came from RapidAPI
+    user_agent = request.headers.get('User-Agent', '')
+    if 'rapidapi' in user_agent.lower():
+        return True, None, 200
+    
+    return False, {
+        "error": "Authentication failed", 
+        "message": "Authentication required"
+    }, 401
 
 
 def validate_youtube_url(url: str) -> bool:
@@ -906,5 +922,6 @@ if __name__ == "__main__":
     # For production on Windows, use waitress instead of gunicorn
     # For development/testing only
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)), debug=False, threaded=True)
+
 
 
