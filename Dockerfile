@@ -14,11 +14,9 @@ WORKDIR /app
 # Copy requirements first (for better Docker layer caching)
 COPY requirements.txt .
 
-# Install Python packages
-RUN pip install --no-cache-dir -r requirements.txt
-
-# Verify waitress is installed
-RUN waitress-serve --help
+# Install Python packages with explicit waitress
+RUN pip install --no-cache-dir -r requirements.txt && \
+    pip install --no-cache-dir waitress==3.0.0
 
 # Copy application code
 COPY api.py .
@@ -30,12 +28,8 @@ RUN mkdir -p temp_downloads
 RUN useradd -m -u 1000 appuser && chown -R appuser:appuser /app
 USER appuser
 
-# Expose port
+# Expose port 
 EXPOSE 5000
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 \
-    CMD curl -f http://localhost:5000/health || exit 1
-
-# Start command - use python -m instead of waitress-serve directly
+# Start command - simple approach for Railway
 CMD ["python", "-m", "waitress", "--host=0.0.0.0", "--port=5000", "--threads=4", "api:app"]
