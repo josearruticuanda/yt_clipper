@@ -97,14 +97,16 @@ def validate_rapidapi_headers() -> Tuple[bool, Optional[Dict], int]:
     Returns:
         Tuple of (is_valid, error_response, status_code)
     """
-    rapidapi_key = request.headers.get('X-RapidAPI-Key')
-    rapidapi_host = request.headers.get('X-RapidAPI-Host')
+    # Temporarily disable authentication for RapidAPI testing
     
-    if not rapidapi_key or not rapidapi_host:
-        return False, {
-            "error": "Authentication failed",
-            "message": "X-RapidAPI-Key and X-RapidAPI-Host headers are required"
-        }, 401
+    # rapidapi_key = request.headers.get('X-RapidAPI-Key')
+    # rapidapi_host = request.headers.get('X-RapidAPI-Host')
+    
+    # if not rapidapi_key or not rapidapi_host:
+    #     return False, {
+    #         "error": "Authentication failed",
+    #         "message": "X-RapidAPI-Key and X-RapidAPI-Host headers are required"
+    #     }, 401
     
     return True, None, 200
 
@@ -904,4 +906,5 @@ if __name__ == "__main__":
     # For production on Windows, use waitress instead of gunicorn
     # For development/testing only
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)), debug=False, threaded=True)
+
 
