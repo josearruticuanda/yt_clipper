@@ -28,8 +28,8 @@ RUN mkdir -p temp_downloads
 RUN useradd -m -u 1000 appuser && chown -R appuser:appuser /app
 USER appuser
 
-# Expose port 
+# Expose port (Railway will auto-detect)
 EXPOSE 5000
 
-# Start command - simple approach for Railway
-CMD ["python", "-m", "waitress", "--host=0.0.0.0", "--port=5000", "--threads=4", "api:app"]
+# Start command with environment variable fallback
+CMD python -c "import os; os.system(f'python -m waitress --host=0.0.0.0 --port={os.environ.get(\"PORT\", \"5000\")} --threads=4 api:app')"
