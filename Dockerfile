@@ -22,5 +22,5 @@ RUN mkdir -p temp_downloads
 # Expose port
 EXPOSE 5000
 
-# Start command that uses Railway's PORT environment variable
-CMD ["sh", "-c", "python -m waitress --host=0.0.0.0 --port=${PORT:-5000} --threads=4 api:app"]
+# Simple start command
+CMD ["python", "-m", "waitress", "--host=0.0.0.0", "--port=5000", "--threads=4", "api:app"]
