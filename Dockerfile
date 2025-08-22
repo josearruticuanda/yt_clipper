@@ -17,6 +17,9 @@ COPY requirements.txt .
 # Install Python packages
 RUN pip install --no-cache-dir -r requirements.txt
 
+# Verify waitress is installed
+RUN waitress-serve --help
+
 # Copy application code
 COPY api.py .
 
@@ -34,5 +37,5 @@ EXPOSE 5000
 HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 \
     CMD curl -f http://localhost:5000/health || exit 1
 
-# Start command
-CMD ["waitress-serve", "--host=0.0.0.0", "--port=5000", "--threads=4", "api:app"]
+# Start command - use python -m instead of waitress-serve directly
+CMD ["python", "-m", "waitress", "--host=0.0.0.0", "--port=5000", "--threads=4", "api:app"]
