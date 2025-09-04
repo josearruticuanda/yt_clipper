@@ -11,7 +11,7 @@ A powerful REST API for downloading YouTube videos, creating custom clips, and e
 - **Enhanced Quality Control**: Separate video and audio quality settings
 - **Docker Ready**: Containerized deployment with all dependencies
 - **Improved Error Handling**: Better validation and user-friendly error messages
-- **Auto-Download in Browser**: Files automatically download when testing in RapidAPI
+- **Auto-Download in Browser**: Files automatically download in browser
 
 ## Core Functionality
 
@@ -22,7 +22,6 @@ A powerful REST API for downloading YouTube videos, creating custom clips, and e
 - Multiple processing modes optimized for speed vs quality
 - Automatic temporary file cleanup
 - Production-ready with comprehensive error handling
-- RapidAPI compatible with proper header validation
 - Fast processing by default for reduced timeout risk
 
 ## Quick Start
@@ -91,7 +90,7 @@ Download a full video, create clips, or extract audio with advanced options.
   - Options: `best`, `320`, `192`, `128`, `worst` (kbps)
   - Default: `best`
 - `download_mode` (string, optional): Processing mode
-  - `fast`: Stream copying - fastest, recommended for RapidAPI (DEFAULT)
+  - `fast`: Stream copying - fastest, recommended (DEFAULT)
   - `balanced`: Fast encode - good balance of speed and quality
   - `precise`: Full re-encode - slowest but most reliable
   - `audio_only`: Audio extraction only
@@ -176,7 +175,6 @@ curl -X POST /download \
 Returns the media file as a binary download with automatic browser download:
 - **Video/Audio only**: Direct MP4/MP3 file download
 - **With subtitles**: ZIP file containing all files
-- **RapidAPI Testing**: Files automatically download in browser (no --output needed)
 
 ### Success Response (Info)
 ```json
@@ -225,7 +223,7 @@ Returns the media file as a binary download with automatic browser download:
 - Maintains original quality
 - Significantly reduces processing time and timeout risk
 - May have minor sync issues with some videos
-- Best for: RapidAPI deployment, long clips, when speed is priority
+- Best for: long clips, when speed is priority
 
 ### Balanced Mode
 - Fast encoding with good quality
@@ -266,7 +264,6 @@ Comprehensive error handling for common scenarios:
 - **Memory management**: Efficient file streaming
 - **Format optimization**: Automatic best format selection
 - **Error recovery**: Graceful handling of failed downloads
-- **RapidAPI Optimized**: Reduced timeout risk for marketplace deployment
 
 ## Technology Stack
 
