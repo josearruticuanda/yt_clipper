@@ -1,7 +1,11 @@
+"""
+Enhanced YouTube Video Clipper API
+A Flask-based YouTube video downloader with advanced clipping and quality options
+"""
+
 import os
 import tempfile
 import logging
-import asyncio
 import zipfile
 from datetime import datetime, timedelta
 from typing import Optional, Tuple, Dict, Any, List
@@ -19,26 +23,26 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# CONFIGURATION
+# Flask configuration
 app = Flask(__name__)
-app.config['MAX_CONTENT_LENGTH'] = 32 * 1024 * 1024  # 32MB max request size
+app.config['MAX_CONTENT_LENGTH'] = 32 * 1024 * 1024  # 32MB max request
 
-# Constants
+# Configuration constants
 DOWNLOAD_FOLDER = "temp_downloads"
 MAX_FILE_AGE_HOURS = 1
-MAX_CLIP_DURATION = 3600  # 1 hour max for reliable API performance
-MIN_CLIP_DURATION = 1     # 1 second min clip duration
-MAX_VIDEO_DURATION = 18000  # 5 hours max total video duration
+MAX_CLIP_DURATION = 3600    # 1 hour
+MIN_CLIP_DURATION = 1       # 1 second
+MAX_VIDEO_DURATION = 18000  # 5 hours
 
 # Ensure download folder exists
 os.makedirs(DOWNLOAD_FOLDER, exist_ok=True)
 
 
 class DownloadMode(Enum):
-    """Download modes for different use cases"""
-    FAST = "fast"          # Stream copying, fastest but may have issues
-    BALANCED = "balanced"  # Good balance of speed and quality
-    PRECISE = "precise"    # Re-encoding, slowest but most reliable
+    """Available download processing modes"""
+    FAST = "fast"              # Stream copying - fastest
+    BALANCED = "balanced"      # Fast encoding - balanced
+    PRECISE = "precise"        # Re-encoding - most reliable
     AUDIO_ONLY = "audio_only"  # Audio extraction only
 
 
@@ -46,7 +50,7 @@ class VideoQuality(Enum):
     """Video quality options"""
     BEST = "best"
     UHD_4K = "2160p"
-    QHD_2K = "1440p"
+    QHD_2K = "1440p" 
     FHD = "1080p"
     HD = "720p"
     SD = "480p"
@@ -55,23 +59,23 @@ class VideoQuality(Enum):
 
 
 class AudioQuality(Enum):
-    """Audio quality options"""
+    """Audio quality options in kbps"""
     BEST = "best"
-    HIGH = "320"    # 320 kbps
-    MEDIUM = "192"  # 192 kbps
-    LOW = "128"     # 128 kbps
+    HIGH = "320"
+    MEDIUM = "192"
+    LOW = "128"
     WORST = "worst"
 
 
 @dataclass
 class DownloadOptions:
-    """Configuration class for download options"""
+    """Configuration for download operations"""
     url: str
     start_time: Optional[int] = None
     end_time: Optional[int] = None
     video_quality: VideoQuality = VideoQuality.BEST
     audio_quality: AudioQuality = AudioQuality.BEST
-    download_mode: DownloadMode = DownloadMode.BALANCED
+    download_mode: DownloadMode = DownloadMode.BALANCED  # Keep original default
     extract_audio: bool = False
     include_subtitles: bool = False
     subtitle_languages: List[str] = None
@@ -92,23 +96,9 @@ class ValidationError(Exception):
 
 def validate_rapidapi_headers() -> Tuple[bool, Optional[Dict], int]:
     """
-    Validate RapidAPI headers for authentication.
-    
-    Returns:
-        Tuple of (is_valid, error_response, status_code)
+    Validate RapidAPI headers for authentication
     """
-    # Temporarily disable authentication for RapidAPI testing
-    
-    # rapidapi_key = request.headers.get('X-RapidAPI-Key')
-    # rapidapi_host = request.headers.get('X-RapidAPI-Host')
-    
-    # if not rapidapi_key or not rapidapi_host:
-    #     return False, {
-    #         "error": "Authentication failed",
-    #         "message": "X-RapidAPI-Key and X-RapidAPI-Host headers are required"
-    #     }, 401
-    
-    # return True, None, 200
+    # Keep the lenient validation from working version
     rapidapi_key = request.headers.get('X-RapidAPI-Key')
     rapidapi_host = request.headers.get('X-RapidAPI-Host')
     
@@ -128,15 +118,7 @@ def validate_rapidapi_headers() -> Tuple[bool, Optional[Dict], int]:
 
 
 def validate_youtube_url(url: str) -> bool:
-    """
-    Validate if the provided URL is a valid YouTube URL.
-    
-    Args:
-        url: URL to validate
-        
-    Returns:
-        True if valid YouTube URL, False otherwise
-    """
+    """Validate if URL is a supported YouTube URL"""
     if not url:
         return False
     
@@ -152,32 +134,23 @@ def validate_youtube_url(url: str) -> bool:
 
 
 def validate_clip_times(start: Optional[int], end: Optional[int], duration: int) -> None:
-    """
-    Validate clip start and end times.
-    
-    Args:
-        start: Start time in seconds
-        end: End time in seconds
-        duration: Video duration in seconds
-        
-    Raises:
-        ValidationError: If validation fails
-    """
-    # Check if video duration exceeds maximum allowed
+    """Validate clip start and end times"""
+    # Check maximum video duration
     if duration > MAX_VIDEO_DURATION:
         raise ValidationError(
             f"Video duration ({format_duration(duration)}) exceeds maximum "
-            f"allowed duration ({format_duration(MAX_VIDEO_DURATION)})"
+            f"allowed ({format_duration(MAX_VIDEO_DURATION)})"
         )
     
     if start is None or end is None:
         return
     
+    # Validate time parameters
     if not isinstance(start, int) or not isinstance(end, int):
         raise ValidationError("Start and end times must be integers")
     
     if start < 0 or end < 0:
-        raise ValidationError("Start and end times must be non-negative")
+        raise ValidationError("Times must be non-negative")
     
     if start >= end:
         raise ValidationError("Start time must be less than end time")
@@ -188,16 +161,15 @@ def validate_clip_times(start: Optional[int], end: Optional[int], duration: int)
             f"({format_duration(duration)})"
         )
     
+    # Validate clip duration
     clip_duration = end - start
     if clip_duration < MIN_CLIP_DURATION:
-        raise ValidationError(
-            f"Clip duration must be at least {MIN_CLIP_DURATION} second(s)"
-        )
+        raise ValidationError(f"Clip must be at least {MIN_CLIP_DURATION} second(s)")
     
     if clip_duration > MAX_CLIP_DURATION:
         raise ValidationError(
-            f"Clip duration ({format_duration(clip_duration)}) cannot exceed "
-            f"maximum allowed ({format_duration(MAX_CLIP_DURATION)})"
+            f"Clip duration ({format_duration(clip_duration)}) exceeds "
+            f"maximum ({format_duration(MAX_CLIP_DURATION)})"
         )
 
 
@@ -224,56 +196,33 @@ def force_cleanup_all_files() -> None:
         logger.error(f"Error during cleanup: {e}")
 
 
-def cleanup_old_files() -> None:
-    """Remove files older than MAX_FILE_AGE_HOURS to prevent storage buildup."""
-    try:
-        cutoff_time = datetime.now() - timedelta(hours=MAX_FILE_AGE_HOURS)
-        
-        for filename in os.listdir(DOWNLOAD_FOLDER):
-            file_path = os.path.join(DOWNLOAD_FOLDER, filename)
-            
-            if os.path.isfile(file_path):
-                file_modified = datetime.fromtimestamp(os.path.getmtime(file_path))
-                if file_modified < cutoff_time:
-                    os.remove(file_path)
-                    logger.info(f"Cleaned up old file: {filename}")
-                    
-    except Exception as e:
-        logger.error(f"Error during cleanup: {e}")
-
-
 def sanitize_filename(filename: str) -> str:
-    """
-    Sanitize filename by removing/replacing invalid characters.
-    
-    Args:
-        filename: Original filename
-        
-    Returns:
-        Sanitized filename
-    """
-    # Remove or replace invalid characters
+    """Sanitize filename for cross-platform compatibility"""
+    # Replace invalid characters
     invalid_chars = '<>:"/\\|?*'
     for char in invalid_chars:
         filename = filename.replace(char, '_')
     
-    # Limit length and strip whitespace
-    return filename.strip()[:100]
+    # Clean up whitespace and special characters
+    filename = filename.replace('  ', ' ').replace('\n', ' ').replace('\r', ' ').replace('\t', ' ')
+    
+    return filename.strip()[:100]  # Limit length
+
+
+def format_duration(seconds: int) -> str:
+    """Format seconds to HH:MM:SS"""
+    if seconds <= 0:
+        return "00:00:00"
+    
+    hours = seconds // 3600
+    minutes = (seconds % 3600) // 60
+    seconds = seconds % 60
+    
+    return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
 
 
 def extract_video_info(url: str) -> Dict[str, Any]:
-    """
-    Extract video information from YouTube URL.
-    
-    Args:
-        url: YouTube video URL
-        
-    Returns:
-        Dictionary containing video information
-        
-    Raises:
-        VideoDownloadError: If extraction fails
-    """
+    """Extract video information from YouTube URL"""
     try:
         ydl_opts = {
             'quiet': True,
@@ -287,25 +236,19 @@ def extract_video_info(url: str) -> Dict[str, Any]:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=False)
             
-            # Extract available formats
+            # Extract available video qualities
             formats = info.get('formats', [])
             available_qualities = set()
             
             for fmt in formats:
                 height = fmt.get('height')
                 if height:
-                    if height >= 2160:
-                        available_qualities.add('2160p')
-                    elif height >= 1440:
-                        available_qualities.add('1440p')
-                    elif height >= 1080:
-                        available_qualities.add('1080p')
-                    elif height >= 720:
-                        available_qualities.add('720p')
-                    elif height >= 480:
-                        available_qualities.add('480p')
-                    elif height >= 360:
-                        available_qualities.add('360p')
+                    if height >= 2160: available_qualities.add('2160p')
+                    elif height >= 1440: available_qualities.add('1440p')
+                    elif height >= 1080: available_qualities.add('1080p')
+                    elif height >= 720: available_qualities.add('720p')
+                    elif height >= 480: available_qualities.add('480p')
+                    elif height >= 360: available_qualities.add('360p')
             
             return {
                 'title': info.get('title', 'Unknown'),
@@ -331,36 +274,8 @@ def extract_video_info(url: str) -> Dict[str, Any]:
         raise VideoDownloadError(f"Failed to extract video information: {str(e)}")
 
 
-def format_duration(seconds: int) -> str:
-    """
-    Format duration from seconds to HH:MM:SS format.
-    
-    Args:
-        seconds: Duration in seconds
-        
-    Returns:
-        Formatted duration string
-    """
-    if seconds <= 0:
-        return "00:00:00"
-    
-    hours = seconds // 3600
-    minutes = (seconds % 3600) // 60
-    seconds = seconds % 60
-    
-    return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
-
-
 def get_format_selector(options: DownloadOptions) -> str:
-    """
-    Get yt-dlp format selector based on options.
-    
-    Args:
-        options: Download options
-        
-    Returns:
-        Format selector string for yt-dlp
-    """
+    """Generate yt-dlp format selector based on options"""
     if options.custom_format:
         return options.custom_format
     
@@ -373,7 +288,7 @@ def get_format_selector(options: DownloadOptions) -> str:
             abr = options.audio_quality.value
             return f"bestaudio[abr<={abr}]/bestaudio/best"
     
-    # Video + Audio formats
+    # Video + Audio format selection
     video_selector = ""
     audio_selector = "bestaudio"
     
@@ -401,18 +316,7 @@ def get_format_selector(options: DownloadOptions) -> str:
 
 
 def get_download_options_from_request(data: Dict[str, Any]) -> DownloadOptions:
-    """
-    Parse request data into DownloadOptions object.
-    
-    Args:
-        data: Request JSON data
-        
-    Returns:
-        DownloadOptions object
-        
-    Raises:
-        ValidationError: If validation fails
-    """
+    """Parse and validate request data into DownloadOptions"""
     url = data.get("url")
     if not url:
         raise ValidationError("URL is required")
@@ -420,28 +324,24 @@ def get_download_options_from_request(data: Dict[str, Any]) -> DownloadOptions:
     if not validate_youtube_url(url):
         raise ValidationError("Invalid YouTube URL")
     
-    # Parse quality options
-    video_quality_str = data.get("video_quality", "best").lower()
+    # Parse and validate quality options
     try:
-        video_quality = VideoQuality(video_quality_str)
+        video_quality = VideoQuality(data.get("video_quality", "best").lower())
     except ValueError:
         valid_qualities = [q.value for q in VideoQuality]
-        raise ValidationError(f"Invalid video quality. Valid options: {valid_qualities}")
+        raise ValidationError(f"Invalid video quality. Valid: {valid_qualities}")
     
-    audio_quality_str = data.get("audio_quality", "best").lower()
     try:
-        audio_quality = AudioQuality(audio_quality_str)
+        audio_quality = AudioQuality(data.get("audio_quality", "best").lower())
     except ValueError:
         valid_qualities = [q.value for q in AudioQuality]
-        raise ValidationError(f"Invalid audio quality. Valid options: {valid_qualities}")
+        raise ValidationError(f"Invalid audio quality. Valid: {valid_qualities}")
     
-    # Parse download mode
-    download_mode_str = data.get("download_mode", "balanced").lower()
     try:
-        download_mode = DownloadMode(download_mode_str)
+        download_mode = DownloadMode(data.get("download_mode", "fast").lower())
     except ValueError:
         valid_modes = [m.value for m in DownloadMode]
-        raise ValidationError(f"Invalid download mode. Valid options: {valid_modes}")
+        raise ValidationError(f"Invalid download mode. Valid: {valid_modes}")
     
     # Parse subtitle languages
     subtitle_languages = data.get("subtitle_languages", [])
@@ -465,18 +365,7 @@ def get_download_options_from_request(data: Dict[str, Any]) -> DownloadOptions:
 
 
 def download_video(options: DownloadOptions) -> str:
-    """
-    Download video from YouTube with customizable options.
-    
-    Args:
-        options: Download configuration options
-        
-    Returns:
-        Path to downloaded file
-        
-    Raises:
-        VideoDownloadError: If download fails
-    """
+    """Download video with specified options - RESTORED FROM WORKING VERSION"""
     try:
         # Get video info first
         info = extract_video_info(options.url)
@@ -522,7 +411,7 @@ def download_video(options: DownloadOptions) -> str:
         elif options.include_subtitles:
             ydl_opts['subtitleslangs'] = ['en']  # Default to English
         
-        # Configure post-processors - FIXED FOR AUDIO CLIPS
+        # Configure post-processors - EXACT LOGIC FROM WORKING VERSION
         postprocessors = []
         
         # Handle audio extraction and clipping together
@@ -562,7 +451,7 @@ def download_video(options: DownloadOptions) -> str:
                 postprocessors.append(audio_postprocessor)
                 
         else:
-            # Video-only clipping (existing logic)
+            # Video-only clipping (existing logic from working version)
             if options.start_time is not None and options.end_time is not None:
                 clip_duration = options.end_time - options.start_time
                 
@@ -615,9 +504,22 @@ def download_video(options: DownloadOptions) -> str:
         if postprocessors:
             ydl_opts['postprocessors'] = postprocessors
         
-        # Download the video
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            ydl.download([options.url])
+        # Download the video with better error handling
+        try:
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                ydl.download([options.url])
+        except yt_dlp.DownloadError as e:
+            error_msg = str(e).lower()
+            if 'http error 403' in error_msg or 'forbidden' in error_msg:
+                raise VideoDownloadError(
+                    "YouTube is blocking access to this video. This can happen with popular music videos or content with strict download restrictions. Try a different video."
+                )
+            elif 'http error 404' in error_msg or 'not found' in error_msg:
+                raise VideoDownloadError("Video not found. The video may be private, deleted, or the URL is incorrect.")
+            elif 'unavailable' in error_msg:
+                raise VideoDownloadError("Video is unavailable in your region or has been removed.")
+            else:
+                raise VideoDownloadError(f"Download failed: {str(e)}")
         
         # For audio extraction, find the actual created file (yt-dlp adds .mp3)
         if options.extract_audio:
@@ -640,7 +542,7 @@ def download_video(options: DownloadOptions) -> str:
         raise VideoDownloadError(f"Download failed: {str(e)}")
 
 
-# ROUTES
+# API ROUTES - EXACT SAME AS WORKING VERSION
 
 @app.route("/", methods=["GET"])
 def home():
@@ -662,7 +564,7 @@ def home():
             "end": "End time in seconds for clipping (optional)",
             "video_quality": f"Video quality: {[q.value for q in VideoQuality]} (default: best)",
             "audio_quality": f"Audio quality: {[q.value for q in AudioQuality]} (default: best)",
-            "download_mode": f"Download mode: {[m.value for m in DownloadMode]} (default: balanced)",
+            "download_mode": f"Download mode: {[m.value for m in DownloadMode]} (default: fast)",
             "extract_audio": "Extract audio only (boolean, default: false)",
             "include_subtitles": "Include subtitles (boolean, default: false)",
             "subtitle_languages": "Subtitle languages (array/comma-separated, e.g., ['en', 'es'])",
@@ -922,6 +824,3 @@ if __name__ == "__main__":
     # For production on Windows, use waitress instead of gunicorn
     # For development/testing only
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)), debug=False, threaded=True)
-
-
-
