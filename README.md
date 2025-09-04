@@ -1,29 +1,59 @@
-# Enhanced YouTube Video Clipper API v2.0
+# Enhanced YouTube Video Clipper API
 
-A powerful REST API for downloading YouTube videos, creating custom clips, and extracting audio with advanced customization options. Built for easy integration and deployment on RapidAPI.
+A powerful REST API for downloading YouTube videos, creating custom clips, and extracting audio with advanced customization options.
 
-## New Features in v2.0
+## Features
 
 - **Audio Extraction**: Extract MP3 audio from videos or clips
 - **Audio Clipping**: Create custom audio clips with precise timing
 - **Subtitle Support**: Download videos with synchronized subtitles
-- **Multiple Download Modes**: Fast, Balanced, and Precise processing
+- **Multiple Download Modes**: Fast (default), Balanced, and Precise processing
 - **Enhanced Quality Control**: Separate video and audio quality settings
-- **Custom Format Support**: Advanced yt-dlp format selectors
-- **Windows Compatibility**: Full support for Windows deployment
-- **Improved Error Handling**: Better validation and error messages
+- **Docker Ready**: Containerized deployment with all dependencies
+- **Improved Error Handling**: Better validation and user-friendly error messages
+- **Auto-Download in Browser**: Files automatically download when testing in RapidAPI
 
-## Features
+## Core Functionality
 
 - Download full YouTube videos in various qualities (360p to 4K)
 - Create custom video and audio clips with precise start/end times
 - Extract high-quality MP3 audio from videos
 - Download videos with embedded or separate subtitles
-- Multiple processing modes for speed vs quality optimization
-- Extract comprehensive video metadata
+- Multiple processing modes optimized for speed vs quality
 - Automatic temporary file cleanup
 - Production-ready with comprehensive error handling
 - RapidAPI compatible with proper header validation
+- Fast processing by default for reduced timeout risk
+
+## Quick Start
+
+```bash
+docker build -t yt-clipper .
+docker run -it --rm -p 5000:5000 yt-clipper
+```
+
+The API will be available at `http://localhost:5000`
+
+### Testing
+```bash
+# Health check
+curl http://localhost:5000/health
+
+# Test video info
+curl -X POST http://localhost:5000/info \
+  -H "Content-Type: application/json" \
+  -H "X-RapidAPI-Key: test-key" \
+  -H "X-RapidAPI-Host: localhost" \
+  -d '{"url": "https://www.youtube.com/watch?v=jNQXAC9IVRw"}'
+
+# Test audio extraction
+curl -X POST http://localhost:5000/download \
+  -H "Content-Type: application/json" \
+  -H "X-RapidAPI-Key: test-key" \
+  -H "X-RapidAPI-Host: localhost" \
+  -d '{"url": "https://www.youtube.com/watch?v=jNQXAC9IVRw", "extract_audio": true}' \
+  --output test.mp3
+```
 
 ## API Endpoints
 
@@ -39,7 +69,7 @@ Extract detailed video metadata without downloading.
 **Example:**
 ```json
 {
-  "url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+  "url": "https://www.youtube.com/watch?v=jNQXAC9IVRw"
 }
 ```
 
@@ -61,11 +91,11 @@ Download a full video, create clips, or extract audio with advanced options.
   - Options: `best`, `320`, `192`, `128`, `worst` (kbps)
   - Default: `best`
 - `download_mode` (string, optional): Processing mode
-  - `fast`: Stream copying - fastest but may have sync issues
+  - `fast`: Stream copying - fastest, recommended for RapidAPI (DEFAULT)
   - `balanced`: Fast encode - good balance of speed and quality
   - `precise`: Full re-encode - slowest but most reliable
   - `audio_only`: Audio extraction only
-  - Default: `balanced`
+  - Default: `fast`
 - `start` (integer, optional): Start time in seconds for clipping
 - `end` (integer, optional): End time in seconds for clipping
 - `extract_audio` (boolean, optional): Extract audio as MP3
@@ -75,11 +105,6 @@ Download a full video, create clips, or extract audio with advanced options.
 - `subtitle_languages` (array, optional): Subtitle languages to download
   - Example: `["en", "es", "fr"]`
   - Default: `["en"]`
-- `thumbnail` (boolean, optional): Download thumbnail image
-  - Default: `false`
-- `metadata` (boolean, optional): Include video metadata
-  - Default: `true`
-- `custom_format` (string, optional): Custom yt-dlp format selector
 
 ### GET /health
 Health check endpoint for monitoring API status.
@@ -92,26 +117,26 @@ curl -X POST /info \
   -H "Content-Type: application/json" \
   -H "X-RapidAPI-Key: your-api-key" \
   -H "X-RapidAPI-Host: your-api-host" \
-  -d '{"url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ"}'
+  -d '{"url": "https://www.youtube.com/watch?v=jNQXAC9IVRw"}'
 ```
 
-### Download Full Video (720p)
+### Download Full Video (720p, Fast Mode)
 ```bash
 curl -X POST /download \
   -H "Content-Type: application/json" \
   -H "X-RapidAPI-Key: your-api-key" \
   -H "X-RapidAPI-Host: your-api-host" \
-  -d '{"url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ", "video_quality": "720p", "download_mode": "balanced"}' \
+  -d '{"url": "https://www.youtube.com/watch?v=jNQXAC9IVRw", "video_quality": "720p"}' \
   --output video.mp4
 ```
 
-### Create Video Clip (30 seconds)
+### Create Video Clip (Fast Mode Default)
 ```bash
 curl -X POST /download \
   -H "Content-Type: application/json" \
   -H "X-RapidAPI-Key: your-api-key" \
   -H "X-RapidAPI-Host: your-api-host" \
-  -d '{"url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ", "start": 30, "end": 60, "video_quality": "720p", "download_mode": "fast"}' \
+  -d '{"url": "https://www.youtube.com/watch?v=jNQXAC9IVRw", "start": 5, "end": 15, "video_quality": "720p"}' \
   --output clip.mp4
 ```
 
@@ -121,7 +146,7 @@ curl -X POST /download \
   -H "Content-Type: application/json" \
   -H "X-RapidAPI-Key: your-api-key" \
   -H "X-RapidAPI-Host: your-api-host" \
-  -d '{"url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ", "extract_audio": true, "audio_quality": "320"}' \
+  -d '{"url": "https://www.youtube.com/watch?v=jNQXAC9IVRw", "extract_audio": true, "audio_quality": "320"}' \
   --output audio.mp3
 ```
 
@@ -131,7 +156,7 @@ curl -X POST /download \
   -H "Content-Type: application/json" \
   -H "X-RapidAPI-Key: your-api-key" \
   -H "X-RapidAPI-Host: your-api-host" \
-  -d '{"url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ", "start": 30, "end": 60, "extract_audio": true, "audio_quality": "320"}' \
+  -d '{"url": "https://www.youtube.com/watch?v=jNQXAC9IVRw", "start": 5, "end": 15, "extract_audio": true, "audio_quality": "320"}' \
   --output audio_clip.mp3
 ```
 
@@ -141,16 +166,17 @@ curl -X POST /download \
   -H "Content-Type: application/json" \
   -H "X-RapidAPI-Key: your-api-key" \
   -H "X-RapidAPI-Host: your-api-host" \
-  -d '{"url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ", "video_quality": "720p", "include_subtitles": true, "subtitle_languages": ["en"]}' \
+  -d '{"url": "https://www.youtube.com/watch?v=jNQXAC9IVRw", "video_quality": "720p", "include_subtitles": true, "subtitle_languages": ["en"]}' \
   --output video_with_subs.zip
 ```
 
 ## Response Formats
 
 ### Success Response (Download)
-Returns the media file as a binary download:
-- **Video/Audio only**: Direct MP4/MP3 file
-- **With subtitles/thumbnails**: ZIP file containing all files
+Returns the media file as a binary download with automatic browser download:
+- **Video/Audio only**: Direct MP4/MP3 file download
+- **With subtitles**: ZIP file containing all files
+- **RapidAPI Testing**: Files automatically download in browser (no --output needed)
 
 ### Success Response (Info)
 ```json
@@ -179,7 +205,7 @@ Returns the media file as a binary download:
 ### Error Response
 ```json
 {
-  "error": "Error description"
+  "error": "YouTube is blocking access to this video. This can happen with popular music videos or content with strict download restrictions. Try a different video."
 }
 ```
 
@@ -194,16 +220,17 @@ Returns the media file as a binary download:
 
 ## Download Modes
 
-### Fast Mode
+### Fast Mode (DEFAULT)
 - Uses stream copying for maximum speed
 - Maintains original quality
+- Significantly reduces processing time and timeout risk
 - May have minor sync issues with some videos
-- Best for: Long clips, when speed is priority
+- Best for: RapidAPI deployment, long clips, when speed is priority
 
-### Balanced Mode (Recommended)
+### Balanced Mode
 - Fast encoding with good quality
 - Good balance of speed and reliability
-- Suitable for most use cases
+- Suitable for most use cases where speed isn't critical
 - Best for: General purpose downloading
 
 ### Precise Mode
@@ -218,55 +245,11 @@ Returns the media file as a binary download:
 - Fast processing
 - Best for: Music, podcasts, audio content
 
-## Local Development
-
-### Prerequisites
-- **Docker**
-
-### Installation
-
-**Windows:**
-```bash
-# Clone and setup
-git clone https://github.com/josearruticuanda/yt_clipper.git
-cd yt_clipper
-docker build -t yt-clipper .
-```
-
-### Running Locally
-
-**Production (Windows):**
-```bash
-docker run -it --rm -p 5000:5000 yt-clipper
-```
-
-The API will be available at `http://localhost:5000`
-
-### Testing
-```bash
-# Health check
-curl http://localhost:5000/health
-
-# Test video info
-curl -X POST http://localhost:5000/info \
-  -H "Content-Type: application/json" \
-  -H "X-RapidAPI-Key: test-key" \
-  -H "X-RapidAPI-Host: localhost" \
-  -d '{"url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ"}'
-
-# Test audio extraction
-curl -X POST http://localhost:5000/download \
-  -H "Content-Type: application/json" \
-  -H "X-RapidAPI-Key: test-key" \
-  -H "X-RapidAPI-Host: localhost" \
-  -d '{"url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ", "extract_audio": true}' \
-  --output test.mp3
-```
-
 ## Error Handling
 
 Comprehensive error handling for common scenarios:
-- Invalid YouTube URLs
+- Invalid YouTube URLs with helpful suggestions
+- Video access blocked by YouTube with clear explanations
 - Unsupported video formats  
 - Invalid quality parameters
 - Invalid clip timing (start >= end, exceeds duration)
@@ -277,30 +260,34 @@ Comprehensive error handling for common scenarios:
 
 ## Performance Optimization
 
+- **Fast Mode Default**: Stream copying for maximum speed
 - **Automatic cleanup**: Temporary files removed after 1 hour
 - **Concurrent processing**: Multi-threaded request handling
 - **Memory management**: Efficient file streaming
 - **Format optimization**: Automatic best format selection
 - **Error recovery**: Graceful handling of failed downloads
+- **RapidAPI Optimized**: Reduced timeout risk for marketplace deployment
 
 ## Technology Stack
 
 - **Flask 3.1.0**: Modern web framework
 - **yt-dlp 2025.8.20**: Latest YouTube processing library
 - **FFmpeg**: Professional video/audio processing
-- **Waitress/Gunicorn**: Production WSGI servers
-- **Python 3.10+**: Modern Python features
+- **Python 3.11**: Modern Python features
+- **Docker**: Containerized deployment
 
 ## API Changelog
 
-### v2.0.0 (Current)
+### Current Version
+- Fast mode set as default
+- Improved error messages for blocked videos
+- Auto-download functionality for browser testing
+- Enhanced validation and user feedback
 - Audio extraction and clipping
 - Subtitle support with ZIP packaging
 - Multiple download modes
 - Enhanced quality controls
-- Windows compatibility
-- Custom format selectors
-- Improved error handling
+- Comprehensive error handling
 
 ## Terms of Use
 
@@ -316,14 +303,4 @@ This API is provided for **educational and personal use only**. Users are respon
 ## License
 
 MIT License - see LICENSE file for details
-
-## Acknowledgments
-
-- **yt-dlp team**: For the excellent YouTube processing library
-- **FFmpeg project**: For powerful media processing capabilities
-- **Flask community**: For the robust web framework
-- **Contributors**: Thanks to all who helped improve this API
-
 ---
-
-**Made with care for developers who need reliable YouTube processing**
