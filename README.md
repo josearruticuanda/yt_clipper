@@ -221,55 +221,23 @@ Returns the media file as a binary download:
 ## Local Development
 
 ### Prerequisites
-- **Python 3.10+** (recommended 3.11)
-- **FFmpeg** (for video/audio processing)
-- **Git**
+- **Docker**
 
 ### Installation
 
 **Windows:**
 ```bash
-# Install Python 3.10+ and FFmpeg
-choco install python ffmpeg  # Using Chocolatey
-# or download from python.org and ffmpeg.org
-
 # Clone and setup
-git clone https://github.com/yourusername/enhanced-youtube-clipper.git
-cd enhanced-youtube-clipper
-python -m venv .venv
-.venv\Scripts\activate
-pip install -r requirements.txt
-```
-
-**Linux/macOS:**
-```bash
-# Install dependencies
-sudo apt install python3.10 ffmpeg  # Ubuntu/Debian
-# or: brew install python@3.10 ffmpeg  # macOS
-
-# Clone and setup
-git clone https://github.com/yourusername/enhanced-youtube-clipper.git
-cd enhanced-youtube-clipper
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
+git clone https://github.com/josearruticuanda/yt_clipper.git
+cd yt_clipper
+docker build -t yt-clipper .
 ```
 
 ### Running Locally
 
-**Development:**
-```bash
-python api.py
-```
-
 **Production (Windows):**
 ```bash
-waitress-serve --host=0.0.0.0 --port=5000 --threads=4 api:app
-```
-
-**Production (Linux/macOS):**
-```bash
-gunicorn --bind 0.0.0.0:5000 --workers 4 --timeout 300 api:app
+docker run -it --rm -p 5000:5000 yt-clipper
 ```
 
 The API will be available at `http://localhost:5000`
@@ -293,43 +261,6 @@ curl -X POST http://localhost:5000/download \
   -H "X-RapidAPI-Host: localhost" \
   -d '{"url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ", "extract_audio": true}' \
   --output test.mp3
-```
-
-## Deployment
-
-### Requirements
-- **Python 3.10+**
-- **FFmpeg**
-- **Waitress** (Windows) or **Gunicorn** (Linux/macOS)
-
-### Environment Variables
-- `PORT`: Server port (default: 5000)
-- `MAX_WORKERS`: Number of worker processes
-- `DOWNLOAD_FOLDER`: Temporary files directory
-
-### Production Deployment
-The API supports deployment on major cloud platforms:
-- **Heroku**: Use Procfile with buildpacks
-- **Railway**: Direct deployment with automatic builds
-- **Render**: Web service with auto-deploy
-- **DigitalOcean App Platform**: Container or buildpack deployment
-- **AWS/Azure/GCP**: Container deployment recommended
-
-### Docker Deployment
-```dockerfile
-FROM python:3.11-slim
-
-# Install FFmpeg
-RUN apt-get update && apt-get install -y ffmpeg && rm -rf /var/lib/apt/lists/*
-
-WORKDIR /app
-COPY requirements.txt .
-RUN pip install -r requirements.txt
-
-COPY api.py .
-EXPOSE 5000
-
-CMD ["waitress-serve", "--host=0.0.0.0", "--port=5000", "--threads=4", "api:app"]
 ```
 
 ## Error Handling
@@ -371,12 +302,6 @@ Comprehensive error handling for common scenarios:
 - Custom format selectors
 - Improved error handling
 
-### v1.0.0
-- Basic video downloading
-- Video clipping functionality
-- Quality selection
-- RapidAPI integration
-
 ## Terms of Use
 
 This API is provided for **educational and personal use only**. Users are responsible for:
@@ -391,13 +316,6 @@ This API is provided for **educational and personal use only**. Users are respon
 ## License
 
 MIT License - see LICENSE file for details
-
-## Support
-
-- **API Issues**: Contact support through RapidAPI platform
-- **Documentation**: Available on RapidAPI marketplace
-- **Technical Support**: Use RapidAPI messaging system
-- **Feature Requests**: Submit through RapidAPI feedback
 
 ## Acknowledgments
 
